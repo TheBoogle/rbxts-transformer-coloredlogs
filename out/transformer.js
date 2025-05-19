@@ -1,15 +1,4 @@
 "use strict";
-var __values = (this && this.__values) || function(o) {
-    var s = typeof Symbol === "function" && Symbol.iterator, m = s && o[s], i = 0;
-    if (m) return m.call(o);
-    if (o && typeof o.length === "number") return {
-        next: function () {
-            if (o && i >= o.length) o = void 0;
-            return { value: o && o[i++], done: !o };
-        }
-    };
-    throw new TypeError(s ? "Object is not iterable." : "Symbol.iterator is not defined.");
-};
 var __read = (this && this.__read) || function (o, n) {
     var m = typeof Symbol === "function" && o[Symbol.iterator];
     if (!m) return o;
@@ -40,107 +29,89 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TransformContext = void 0;
+exports.default = transformer;
 var typescript_1 = __importDefault(require("typescript"));
-var crypto_1 = __importDefault(require("crypto"));
 var TransformContext = /** @class */ (function () {
     function TransformContext(program, context, config) {
         this.program = program;
         this.context = context;
         this.config = config;
-        this.EnumMemberUUIDs = new Map();
         this.factory = context.factory;
     }
     TransformContext.prototype.transform = function (node) {
         var _this = this;
-        return typescript_1.default.visitEachChild(node, function (node) { return visitNode(_this, node); }, this.context);
+        return typescript_1.default.visitEachChild(node, function (child) { return visitNode(_this, child); }, this.context);
     };
     return TransformContext;
 }());
 exports.TransformContext = TransformContext;
-/**
- * Visits each node and applies necessary transforms.
- */
 function visitNode(context, node) {
     if (typescript_1.default.isExpression(node)) {
         return visitExpression(context, node);
     }
     return context.transform(node);
 }
-/**
- * Transforms:
- * - $id() → a new UUID per call
- * - Enum.Member → assigned UUID (lazily generated)
- */
 function visitExpression(context, node) {
+    var _a;
     var factory = context.factory;
-    // $id() → new UUID
     if (typescript_1.default.isCallExpression(node)) {
         var expression = node.expression;
-        if (typescript_1.default.isIdentifier(expression) && expression.text === "$id") {
-            return factory.createStringLiteral(crypto_1.default.randomUUID());
-        }
-    }
-    // Enum.Member → "uuid"
-    if (typescript_1.default.isPropertyAccessExpression(node)) {
-        var checker = context.program.getTypeChecker();
-        var memberSymbol = checker.getSymbolAtLocation(node.name);
-        var enumSymbol = checker.getSymbolAtLocation(node.expression);
-        if (memberSymbol && enumSymbol && isUuidEnum(enumSymbol)) {
-            var uuid = getOrCreateUuid(context, memberSymbol);
-            // Force a replacement node every time, even if UUID hasn't changed
-            return factory.createStringLiteral(uuid);
+        if (typescript_1.default.isIdentifier(expression)) {
+            var logType = getLogType(expression.text);
+            if (logType) {
+                var emoji = getEmojiForLogType(logType);
+                var utf8Bytes = convertToUtf8Bytes(emoji);
+                var sourceFile = node.getSourceFile();
+                var line = typescript_1.default.getLineAndCharacterOfPosition(sourceFile, node.getStart()).line;
+                var fileName = (_a = sourceFile.fileName.split(/[\\/]/).pop()) !== null && _a !== void 0 ? _a : "unknown";
+                var locationText = "[".concat(fileName, ":").concat(line + 1, "]");
+                var emojiExpression = factory.createCallExpression(factory.createPropertyAccessExpression(factory.createIdentifier("string"), factory.createIdentifier("char")), undefined, utf8Bytes.map(function (b) { return factory.createNumericLiteral(b); }));
+                var fullPrefix = factory.createBinaryExpression(emojiExpression, typescript_1.default.SyntaxKind.PlusToken, factory.createStringLiteral(" ".concat(locationText)));
+                return factory.createCallExpression(factory.createIdentifier("print"), undefined, __spreadArray([
+                    fullPrefix
+                ], __read(node.arguments), false));
+            }
         }
     }
     return context.transform(node);
 }
-/**
- * Returns true if the enum declaration has a @uuid JSDoc tag.
- */
-function isUuidEnum(symbol) {
-    var e_1, _a;
-    var declarations = symbol.getDeclarations();
-    if (!declarations)
-        return false;
-    try {
-        for (var declarations_1 = __values(declarations), declarations_1_1 = declarations_1.next(); !declarations_1_1.done; declarations_1_1 = declarations_1.next()) {
-            var decl = declarations_1_1.value;
-            if (typescript_1.default.isEnumDeclaration(decl)) {
-                var tags = typescript_1.default.getJSDocTags(decl);
-                if (tags.some(function (tag) { return tag.tagName.text === "uuid"; })) {
-                    return true;
-                }
-            }
-        }
+function getLogType(name) {
+    switch (name) {
+        case "$loginfo":
+            return "info";
+        case "$logwarn":
+            return "warn";
+        case "$logerror":
+            return "error";
+        case "$logsuccess":
+            return "success";
+        default:
+            return undefined;
     }
-    catch (e_1_1) { e_1 = { error: e_1_1 }; }
-    finally {
-        try {
-            if (declarations_1_1 && !declarations_1_1.done && (_a = declarations_1.return)) _a.call(declarations_1);
-        }
-        finally { if (e_1) throw e_1.error; }
-    }
-    return false;
 }
-/**
- * Returns the existing UUID for this member, or assigns a new one.
- */
-function getOrCreateUuid(context, symbol) {
-    var existing = context.EnumMemberUUIDs.get(symbol);
-    if (!existing) {
-        existing = crypto_1.default.randomUUID();
-        context.EnumMemberUUIDs.set(symbol, existing);
+// 💡 You just type the emoji normally here
+function getEmojiForLogType(type) {
+    switch (type) {
+        case "info":
+            return "🔵";
+        case "warn":
+            return "🟡";
+        case "error":
+            return "🔴";
+        case "success":
+            return "🟢";
     }
-    return existing;
 }
-/**
- * Transformer entry point.
- */
+// 🔁 Convert emoji to its UTF-8 byte array
+function convertToUtf8Bytes(char) {
+    var buffer = Buffer.from(char, "utf8");
+    return Array.from(buffer);
+}
 function transformer(program, config) {
     return function (context) {
         var transformContext = new TransformContext(program, context, config);
         return function (file) {
             var transformed = transformContext.transform(file);
-            // Touch: update with no-op to ensure emit
             return typescript_1.default.factory.updateSourceFile(transformed, __spreadArray([], __read(transformed.statements), false), true);
         };
     };

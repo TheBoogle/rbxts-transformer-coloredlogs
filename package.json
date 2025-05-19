@@ -1,7 +1,7 @@
 {
-	"name": "rbxts-transformer-randomid",
+	"name": "rbxts-transformer-coloredlogs",
 	"version": "1.0.0",
-	"description": "A transformer that converts $id to a random id.",
+	"description": "A transformer for fancy logging",
 	"main": "out/index.js",
 	"author": "Boogle",
 	"license": "ISC",
